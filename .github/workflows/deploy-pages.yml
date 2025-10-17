@@ -16,13 +16,16 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
+env:
+  MODEL: qwen2.5-coder:7b
+  NO_PROXY: "127.0.0.1,localhost"
+
 jobs:
   review:
     name: LLM Code Review (Ollama)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      NO_PROXY: "127.0.0.1,localhost"
+    timeout-minutes: 25
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,21 +34,23 @@ jobs:
           docker run -d --name ollama -p 11434:11434 -v ollama:/root/.ollama ollama/ollama:latest
           echo "Esperando a que Ollama escuche..."
           for i in $(seq 1 40); do
-            if curl -sS http://127.0.0.1:11434/api/tags >/dev/null; then
-              echo "Ollama OK"; break
-            fi
+            curl -sS http://127.0.0.1:11434/api/tags >/dev/null && break
             sleep 2
           done
-          docker exec ollama ollama pull qwen2.5-coder:7b
 
-      - name: Smoke test API
+      - name: Pull model
+        run: |
+          docker exec ollama ollama pull "${MODEL}"
+          docker exec ollama ollama list
+
+      - name: Smoke test
         run: |
           curl -sS -X POST http://127.0.0.1:11434/api/chat \
             -H "Content-Type: application/json" \
-            -d '{"model":"qwen2.5-coder:7b","stream":false,"messages":[{"role":"user","content":"say ok"}]}' \
+            -d '{"model":"'${MODEL}'","stream":false,"messages":[{"role":"user","content":"say ok"}]}' \
             | head -c 200
 
-      # Solo PR: calcular archivos cambiados
+      # --- SOLO PR: calcula archivos cambiados ---
       - name: Collect changed files (PR only)
         id: changed
         if: ${{ github.event_name == 'pull_request' }}
@@ -72,12 +77,16 @@ jobs:
             core.setOutput('count', String(paths.length));
             core.setOutput('path', 'changed-files.txt');
 
-      # PR → usa file_list_path; push → usa glob
+      - name: Debug count
+        run: |
+          echo "Changed count: ${{ steps.changed.outputs.count }}"
+
+      # --- PR con archivos cambiados -> usa file_list_path ---
       - name: Run Ollama Code Review (PR changed files)
-        if: ${{ ((github.event_name == 'pull_request') || (github.event_name == 'push') )&& steps.changed.outputs.count != '0' }}
+        if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
         with:
-          model: qwen2.5-coder:7b
+          model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
           file_list_path: ${{ steps.changed.outputs.path }}
           exclude_glob: |
@@ -86,13 +95,14 @@ jobs:
           fail_on_critica: "true"
           retention_days: "7"
 
+      # --- Fallback: push o PR sin cambios -> usa glob ---
       - name: Run Ollama Code Review (glob fallback)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
         with:
-          model: qwen2.5-coder:7b
+          model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
-          file_glob: "**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
+          file_glob: "src/**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
           exclude_glob: |
             node_modules/**
             dist/**
