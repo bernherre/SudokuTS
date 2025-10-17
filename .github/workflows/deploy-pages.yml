@@ -74,7 +74,7 @@ jobs:
 
       # PR → usa file_list_path; push → usa glob
       - name: Run Ollama Code Review (PR changed files)
-        if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
+        if: ${{ ((github.event_name == 'pull_request') || (github.event_name == 'push') )&& steps.changed.outputs.count != '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
         with:
           model: qwen2.5-coder:7b
