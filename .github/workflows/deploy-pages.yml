@@ -17,7 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MODEL: qwen2.5-coder:3b
+  # Modelo a usar (cámbialo aquí y se aplica a pull + action)
+  MODEL: qwen2.5-coder:7b
+  # Evita proxies para localhost
   NO_PROXY: "127.0.0.1,localhost"
 
 jobs:
@@ -29,28 +31,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start Ollama in Docker
+      # Arranca Ollama y mantenlo "caliente" (no descargue el modelo entre llamadas)
+      - name: Start Ollama in Docker (keep-alive)
         run: |
-          docker run -d --name ollama -p 11434:11434 -v ollama:/root/.ollama ollama/ollama:latest
+          docker run -d --name ollama -p 11434:11434 \
+            -e OLLAMA_KEEP_ALIVE=10m \
+            -v ollama:/root/.ollama \
+            ollama/ollama:latest
           echo "Esperando a que Ollama escuche..."
           for i in $(seq 1 40); do
-            curl -sS http://127.0.0.1:11434/api/tags >/dev/null && break
+            if curl -sS http://127.0.0.1:11434/api/tags >/dev/null; then
+              echo "Ollama OK"; break
+            fi
             sleep 2
           done
 
-      - name: Pull model
+      # Asegúrate de hacer pull del modelo QUE DE VERDAD USAS
+      - name: Pull ${{ env.MODEL }}
         run: |
           docker exec ollama ollama pull "${MODEL}"
           docker exec ollama ollama list
 
-      - name: Smoke test
+      # Smoke test a /api/chat con el modelo elegido
+      - name: Smoke test API (${{ env.MODEL }})
         run: |
           curl -sS -X POST http://127.0.0.1:11434/api/chat \
             -H "Content-Type: application/json" \
-            -d '{"model":"'${MODEL}'","stream":false,"messages":[{"role":"user","content":"say ok"}]}' \
+            -d '{"model":"'${MODEL}'","stream":false,"messages":[{"role":"user","content":"ok"}]}' \
             | head -c 200
 
-      # --- SOLO PR: calcula archivos cambiados ---
+      # --- SOLO PR: calcula archivos cambiados para reducir scope ---
       - name: Collect changed files (PR only)
         id: changed
         if: ${{ github.event_name == 'pull_request' }}
@@ -72,19 +82,20 @@ jobs:
             const paths = files
               .filter(f => !['removed'].includes(f.status))
               .map(f => f.filename)
-              .filter(p => !p.match(/\.(png|jpe?g|gif|webp|pdf|zip|ico|wasm|exe|dll|so)$/i));
+              // filtra binarios y artefactos
+              .filter(p => !p.match(/\.(png|jpe?g|gif|webp|pdf|zip|ico|wasm|exe|dll|so)$/i))
+              .filter(p => !p.startsWith('ollama-review-report/'));
             fs.writeFileSync('changed-files.txt', paths.join('\n'));
             core.setOutput('count', String(paths.length));
             core.setOutput('path', 'changed-files.txt');
 
       - name: Debug count
-        run: |
-          echo "Changed count: ${{ steps.changed.outputs.count }}"
+        run: echo "Changed count: ${{ steps.changed.outputs.count }}"
 
-      # --- PR con archivos cambiados -> usa file_list_path ---
+      # --- PR con cambios -> revisa SOLO esos archivos ---
       - name: Run Ollama Code Review (PR changed files)
         if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
-        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.3
+        uses: bernherre/checkwithai/action-ollama-codereview@v1
         with:
           model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
@@ -95,10 +106,10 @@ jobs:
           fail_on_critica: "true"
           retention_days: "7"
 
-      # --- Fallback: push o PR sin cambios -> usa glob ---
+      # --- Fallback: push o PR sin cambios -> usa glob limitado (ajusta carpeta si no usas src/) ---
       - name: Run Ollama Code Review (glob fallback)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
-        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.3
+        uses: bernherre/checkwithai/action-ollama-codereview@v1
         with:
           model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
