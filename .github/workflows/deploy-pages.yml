@@ -1,4 +1,5 @@
 name: Deploy to GitHub Pages
+
 on:
   push:
     branches: [ main ]
@@ -8,33 +9,83 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # Para comentar en PR si luego lo activas:
+  # pull-requests: write
 
 concurrency:
   group: "pages"
   cancel-in-progress: true
 
 jobs:
-  build:
+  review:
+    name: LLM Code Review (Ollama)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Levanta Ollama en Docker (hosted runner)
+      - name: Start Ollama in Docker
+        run: |
+          docker run -d --name ollama -p 11434:11434 -v ollama:/root/.ollama ollama/ollama:latest
+          for i in $(seq 1 30); do
+            curl -sS http://localhost:11434/api/tags && break
+            sleep 2
+          done
+          docker exec ollama ollama pull qwen2.5-coder:7b
+
+      # Ejecuta tu Action publicada por tag (ajusta owner/repo)
+      - name: Run Ollama Code Review
+        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
+        with:
+          model: qwen2.5-coder:7b
+          server_url: http://localhost:11434
+          # Como no es PR, usa un glob (ajústalo a tu stack)
+          file_glob: "**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
+          exclude_glob: |
+            node_modules/**
+            dist/**
+          fail_on_critica: "true"
+          retention_days: "7"
+
+      # (Opcional) Sube el reporte como artefacto
+      - name: Upload review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-review
+          path: ollama-review-report/**
+          retention-days: 7
+
+  build:
+    name: Build static site
+    needs: review          # <- espera a que el review termine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
+
       - name: Install
         run: npm ci || npm i
+
       - name: Build
         run: npm run build
         env:
-          # Let vite.config.ts compute correct base href
           GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+
   deploy:
+    name: Deploy to Pages
     needs: build
     runs-on: ubuntu-latest
     environment:
