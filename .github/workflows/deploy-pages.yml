@@ -90,7 +90,7 @@ jobs:
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
         with:
-          model: qwen2.5-coder:3b
+          model: qwen2.5-coder:7b
           server_url: http://127.0.0.1:11434
           file_glob: "**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
           exclude_glob: |
