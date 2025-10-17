@@ -9,8 +9,6 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  # Para comentar en PR si luego lo activas:
-  # pull-requests: write
 
 concurrency:
   group: "pages"
@@ -20,26 +18,44 @@ jobs:
   review:
     name: LLM Code Review (Ollama)
     runs-on: ubuntu-latest
+    env:
+      # Evita que fetch/curl usen proxy para localhost si el runner tiene proxy
+      NO_PROXY: "127.0.0.1,localhost"
     steps:
       - uses: actions/checkout@v4
 
-      # Levanta Ollama en Docker (hosted runner)
       - name: Start Ollama in Docker
         run: |
           docker run -d --name ollama -p 11434:11434 -v ollama:/root/.ollama ollama/ollama:latest
-          for i in $(seq 1 30); do
-            curl -sS http://localhost:11434/api/tags && break
+          echo "Esperando a que Ollama escuche..."
+          for i in $(seq 1 40); do
+            if curl -sS http://127.0.0.1:11434/api/tags >/dev/null; then
+              echo "Ollama OK"; break
+            fi
             sleep 2
           done
-          docker exec ollama ollama pull qwen2.5-coder:7b
 
-      # Ejecuta tu Action publicada por tag (ajusta owner/repo)
+      - name: Pull model
+        run: |
+          set -e
+          docker exec ollama ollama pull qwen2.5-coder:7b
+          # Verifica nuevamente que responde
+          curl -sS http://127.0.0.1:11434/api/tags | head -c 200 || true
+
+      # (Opcional) Debug: prueba un chat mínimo directo a la API
+      - name: Smoke test API
+        run: |
+          set -e
+          curl -sS -X POST http://127.0.0.1:11434/api/chat \
+            -H "Content-Type: application/json" \
+            -d '{"model":"qwen2.5-coder:7b","stream":false,"messages":[{"role":"user","content":"say ok"}]}' \
+            | head -c 300 || (docker logs --tail 100 ollama; exit 1)
+
       - name: Run Ollama Code Review
         uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
         with:
           model: qwen2.5-coder:7b
-          server_url: http://localhost:11434
-          # Como no es PR, usa un glob (ajústalo a tu stack)
+          server_url: http://127.0.0.1:11434
           file_glob: "**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
           exclude_glob: |
             node_modules/**
@@ -47,7 +63,6 @@ jobs:
           fail_on_critica: "true"
           retention_days: "7"
 
-      # (Opcional) Sube el reporte como artefacto
       - name: Upload review artifact
         uses: actions/upload-artifact@v4
         with:
@@ -55,30 +70,30 @@ jobs:
           path: ollama-review-report/**
           retention-days: 7
 
+      # Si algo falla arriba, muestra logs de Ollama
+      - name: Dump Ollama logs on failure
+        if: failure()
+        run: docker logs --tail 200 ollama || true
+
   build:
     name: Build static site
-    needs: review          # <- espera a que el review termine
+    needs: review
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-
       - name: Install
         run: npm ci || npm i
-
       - name: Build
         run: npm run build
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
