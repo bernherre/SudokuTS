@@ -84,7 +84,7 @@ jobs:
       # --- PR con archivos cambiados -> usa file_list_path ---
       - name: Run Ollama Code Review (PR changed files)
         if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
-        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
+        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.3
         with:
           model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
@@ -98,7 +98,7 @@ jobs:
       # --- Fallback: push o PR sin cambios -> usa glob ---
       - name: Run Ollama Code Review (glob fallback)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
-        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.1
+        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.3
         with:
           model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
