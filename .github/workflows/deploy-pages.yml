@@ -17,9 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Modelo a usar (cámbialo aquí y se aplica a pull + action)
   MODEL: qwen2.5-coder:7b
-  # Evita proxies para localhost
   NO_PROXY: "127.0.0.1,localhost"
 
 jobs:
@@ -31,7 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Arranca Ollama y mantenlo "caliente" (no descargue el modelo entre llamadas)
       - name: Start Ollama in Docker (keep-alive)
         run: |
           docker run -d --name ollama -p 11434:11434 \
@@ -46,13 +43,11 @@ jobs:
             sleep 2
           done
 
-      # Asegúrate de hacer pull del modelo QUE DE VERDAD USAS
       - name: Pull ${{ env.MODEL }}
         run: |
           docker exec ollama ollama pull "${MODEL}"
           docker exec ollama ollama list
 
-      # Smoke test a /api/chat con el modelo elegido
       - name: Smoke test API (${{ env.MODEL }})
         run: |
           curl -sS -X POST http://127.0.0.1:11434/api/chat \
@@ -60,7 +55,6 @@ jobs:
             -d '{"model":"'${MODEL}'","stream":false,"messages":[{"role":"user","content":"ok"}]}' \
             | head -c 200
 
-      # --- SOLO PR: calcula archivos cambiados para reducir scope ---
       - name: Collect changed files (PR only)
         id: changed
         if: ${{ github.event_name == 'pull_request' }}
@@ -82,17 +76,20 @@ jobs:
             const paths = files
               .filter(f => !['removed'].includes(f.status))
               .map(f => f.filename)
-              // filtra binarios y artefactos
               .filter(p => !p.match(/\.(png|jpe?g|gif|webp|pdf|zip|ico|wasm|exe|dll|so)$/i))
               .filter(p => !p.startsWith('ollama-review-report/'));
             fs.writeFileSync('changed-files.txt', paths.join('\n'));
             core.setOutput('count', String(paths.length));
             core.setOutput('path', 'changed-files.txt');
 
+      # 🔧 Fix YAML: pasar el output como env y luego echo
       - name: Debug count
-        run: echo "Changed count: ${{ steps.changed.outputs.count }}"
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          CHANGED_COUNT: ${{ steps.changed.outputs.count }}
+        run: |
+          echo "Changed count: ${CHANGED_COUNT:-0}"
 
-      # --- PR con cambios -> revisa SOLO esos archivos ---
       - name: Run Ollama Code Review (PR changed files)
         if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1
@@ -106,7 +103,6 @@ jobs:
           fail_on_critica: "true"
           retention_days: "7"
 
-      # --- Fallback: push o PR sin cambios -> usa glob limitado (ajusta carpeta si no usas src/) ---
       - name: Run Ollama Code Review (glob fallback)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1
