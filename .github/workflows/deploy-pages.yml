@@ -90,18 +90,24 @@ jobs:
         run: |
           echo "Changed count: ${CHANGED_COUNT:-0}"
 
-      - name: Run Ollama Code Review (PR changed files)
-        if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
-        uses: bernherre/checkwithai/action-ollama-codereview@v1
+      - name: Run Ollama Code Review (glob fallback)
+        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.5
         with:
-          model: ${{ env.MODEL }}
+          model: ${{ env.MODEL }}             # ej. qwen2.5-coder:7b
           server_url: http://127.0.0.1:11434
-          file_list_path: ${{ steps.changed.outputs.path }}
+          file_glob: "src/**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
           exclude_glob: |
-            node_modules/**
-            dist/**
+              node_modules/**
+              dist/**
           fail_on_critica: "true"
           retention_days: "7"
+            # 🔧 NUEVO
+          request_timeout_ms: "300000"        # 5 min/archivo
+          max_bytes_per_file: "307200"        # 300 KB
+          ollama_num_predict: "512"
+          ollama_num_ctx: "2048"
+          ollama_temperature: "0"
+
 
       - name: Run Ollama Code Review (glob fallback)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
