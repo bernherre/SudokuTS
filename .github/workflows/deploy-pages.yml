@@ -30,14 +30,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Start Ollama in Docker (keep-alive)
+        env:
+          NO_PROXY: "127.0.0.1,localhost"
         run: |
+          set -e
           docker run -d --name ollama -p 11434:11434 \
             -e OLLAMA_KEEP_ALIVE=10m \
             -v ollama:/root/.ollama \
             ollama/ollama:latest
           echo "Esperando a que Ollama escuche..."
           for i in $(seq 1 40); do
-            if curl -sS http://127.0.0.1:11434/api/tags >/dev/null; then
+            if curl -sS --fail --max-time 5 http://127.0.0.1:11434/api/tags >/dev/null; then
               echo "Ollama OK"; break
             fi
             sleep 2
@@ -52,9 +55,10 @@ jobs:
         run: |
           curl -sS -X POST http://127.0.0.1:11434/api/chat \
             -H "Content-Type: application/json" \
-            -d '{"model":"'${MODEL}'","stream":false,"messages":[{"role":"user","content":"ok"}]}' \
+            -d '{"model":"'"${MODEL}"'","stream":false,"messages":[{"role":"user","content":"ok"}],"keep_alive":"10m"}' \
             | head -c 200
 
+      # PR: recolecta archivos cambiados
       - name: Collect changed files (PR only)
         id: changed
         if: ${{ github.event_name == 'pull_request' }}
@@ -74,15 +78,16 @@ jobs:
               page++;
             }
             const paths = files
-              .filter(f => !['removed'].includes(f.status))
+              .filter(f => f.status !== 'removed')
               .map(f => f.filename)
+              // Mantén solo binarios realmente binarios fuera:
               .filter(p => !p.match(/\.(png|jpe?g|gif|webp|pdf|zip|ico|wasm|exe|dll|so)$/i))
+              // Evita revisarte a ti mismo:
               .filter(p => !p.startsWith('ollama-review-report/'));
             fs.writeFileSync('changed-files.txt', paths.join('\n'));
             core.setOutput('count', String(paths.length));
             core.setOutput('path', 'changed-files.txt');
 
-      # 🔧 Fix YAML: pasar el output como env y luego echo
       - name: Debug count
         if: ${{ github.event_name == 'pull_request' }}
         env:
@@ -90,37 +95,57 @@ jobs:
         run: |
           echo "Changed count: ${CHANGED_COUNT:-0}"
 
-      - name: Run Ollama Code Review (glob fallback)
-        uses: bernherre/checkwithai/action-ollama-codereview@v1.0.5
+      # PR con archivos cambiados → usa file_list_path
+      - name: Run Ollama Code Review (PR changed files)
+        if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
+        uses: bernherre/checkwithai/action-ollama-codereview@v1
         with:
-          model: ${{ env.MODEL }}             # ej. qwen2.5-coder:7b
+          model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
-          file_glob: "src/**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
+          file_list_path: ${{ steps.changed.outputs.path }}
           exclude_glob: |
-              node_modules/**
-              dist/**
+            **/node_modules/**
+            **/dist/**
+            **/build/**
+            **/.next/**
+            **/coverage/**
+            **/ollama-review-report/**
+            action-ollama-codereview/**
           fail_on_critica: "true"
           retention_days: "7"
-            # 🔧 NUEVO
-          request_timeout_ms: "300000"        # 5 min/archivo
-          max_bytes_per_file: "307200"        # 300 KB
-          ollama_num_predict: "512"
-          ollama_num_ctx: "2048"
+          # performance
+          request_timeout_ms: "300000"
+          max_bytes_per_file: "200000"
+          ollama_num_predict: "256"
+          ollama_num_ctx: "1536"
           ollama_temperature: "0"
 
-
-      - name: Run Ollama Code Review (glob fallback)
+      # Fallback para:
+      #  - PR con count == 0 (p.ej. solo README/workflows)
+      #  - push a main
+      - name: Run Ollama Code Review (fallback amplio)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1
         with:
           model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
-          file_glob: "src/**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
+          # 👇 más amplio para el repo de la acción (incluye yml/md)
+          file_glob: "**/*.{js,ts,tsx,jsx,json,yml,yaml,md}"
           exclude_glob: |
-            node_modules/**
-            dist/**
+            **/node_modules/**
+            **/dist/**
+            **/build/**
+            **/.next/**
+            **/coverage/**
+            **/ollama-review-report/**
+            action-ollama-codereview/**
           fail_on_critica: "true"
           retention_days: "7"
+          request_timeout_ms: "300000"
+          max_bytes_per_file: "200000"
+          ollama_num_predict: "256"
+          ollama_num_ctx: "1536"
+          ollama_temperature: "0"
 
       - name: Upload review artifact
         uses: actions/upload-artifact@v4
