@@ -25,6 +25,9 @@ jobs:
     name: LLM Code Review (Ollama)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # Estabilidad > velocidad dentro del contenedor (puedes subir a "2" si va sobrado)
+      REVIEW_MAX_CONCURRENCY: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +61,7 @@ jobs:
             -d '{"model":"'"${MODEL}"'","stream":false,"messages":[{"role":"user","content":"ok"}],"keep_alive":"10m"}' \
             | head -c 200
 
-      # PR: recolecta archivos cambiados
+      # --- Solo PR: recolecta archivos cambiados (y filtra a código) ---
       - name: Collect changed files (PR only)
         id: changed
         if: ${{ github.event_name == 'pull_request' }}
@@ -77,13 +80,11 @@ jobs:
               if (data.length < per_page) break;
               page++;
             }
+            // Mantén SOLO código (evita .md/.yml/.json de config para bajar tokens/latencia)
             const paths = files
               .filter(f => f.status !== 'removed')
               .map(f => f.filename)
-              // Mantén solo binarios realmente binarios fuera:
-              .filter(p => !p.match(/\.(png|jpe?g|gif|webp|pdf|zip|ico|wasm|exe|dll|so)$/i))
-              // Evita revisarte a ti mismo:
-              .filter(p => !p.startsWith('ollama-review-report/'));
+              .filter(p => p.match(/\.(ts|tsx|js|jsx|py|cs|java|go|rs)$/i));
             fs.writeFileSync('changed-files.txt', paths.join('\n'));
             core.setOutput('count', String(paths.length));
             core.setOutput('path', 'changed-files.txt');
@@ -92,13 +93,14 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         env:
           CHANGED_COUNT: ${{ steps.changed.outputs.count }}
-        run: |
-          echo "Changed count: ${CHANGED_COUNT:-0}"
+        run: echo "Changed count: ${CHANGED_COUNT:-0}"
 
-      # PR con archivos cambiados → usa file_list_path
+      # --- PR con cambiados → usa lista ---
       - name: Run Ollama Code Review (PR changed files)
         if: ${{ github.event_name == 'pull_request' && steps.changed.outputs.count != '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1
+        env:
+          REVIEW_MAX_CONCURRENCY: ${{ env.REVIEW_MAX_CONCURRENCY }}
         with:
           model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
@@ -113,24 +115,23 @@ jobs:
             action-ollama-codereview/**
           fail_on_critica: "true"
           retention_days: "7"
-          # performance
-          request_timeout_ms: "300000"
-          max_bytes_per_file: "200000"
-          ollama_num_predict: "256"
-          ollama_num_ctx: "1536"
+          # performance / resiliencia
+          request_timeout_ms: "600000"   # 10 min por archivo (primeras corridas). Luego puedes bajar a 300000
+          max_bytes_per_file: "200000"   # 200 KB para acelerar
+          ollama_num_predict: "192"
+          ollama_num_ctx: "1024"
           ollama_temperature: "0"
 
-      # Fallback para:
-      #  - PR con count == 0 (p.ej. solo README/workflows)
-      #  - push a main
-      - name: Run Ollama Code Review (fallback amplio)
+      # --- Fallback: push a main o PR sin cambiados de código ---
+      - name: Run Ollama Code Review (fallback: solo código)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1
+        env:
+          REVIEW_MAX_CONCURRENCY: ${{ env.REVIEW_MAX_CONCURRENCY }}
         with:
           model: ${{ env.MODEL }}
           server_url: http://127.0.0.1:11434
-          # 👇 más amplio para el repo de la acción (incluye yml/md)
-          file_glob: "**/*.{js,ts,tsx,jsx,json,yml,yaml,md}"
+          file_glob: "src/**/*.{ts,tsx,js,jsx,py,cs,java,go,rs}"
           exclude_glob: |
             **/node_modules/**
             **/dist/**
@@ -141,10 +142,10 @@ jobs:
             action-ollama-codereview/**
           fail_on_critica: "true"
           retention_days: "7"
-          request_timeout_ms: "300000"
+          request_timeout_ms: "600000"
           max_bytes_per_file: "200000"
-          ollama_num_predict: "256"
-          ollama_num_ctx: "1536"
+          ollama_num_predict: "192"
+          ollama_num_ctx: "1024"
           ollama_temperature: "0"
 
       - name: Upload review artifact
