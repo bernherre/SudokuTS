@@ -35,7 +35,7 @@ npm run preview
 4. El workflow `Deploy to GitHub Pages` publicará `dist/` en tu página y revisa con AI el código cambiado.
 
 > El `vite.config.ts` usa la variable `GITHUB_REPOSITORY` para ajustar
-> el `base` automáticamente, evitando caminos rotos.
+> el `base` automáticamente, evitando caminos rotos
 
 ## Atajos
 - Introduce números con el teclado (`1..n`). `Backspace` borra.

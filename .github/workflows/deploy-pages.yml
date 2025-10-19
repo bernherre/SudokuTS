@@ -124,7 +124,7 @@ jobs:
           ollama_temperature: "0"
 
       # --- Fallback: push a main o PR sin cambiados de código ---
-      - name: Run Ollama Code Review (fallback: solo código)
+      - name: Run Ollama Code Review (fallback solo código)
         if: ${{ github.event_name != 'pull_request' || steps.changed.outputs.count == '0' }}
         uses: bernherre/checkwithai/action-ollama-codereview@v1
         env:
