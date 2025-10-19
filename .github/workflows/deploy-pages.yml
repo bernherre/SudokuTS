@@ -93,7 +93,8 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         env:
           CHANGED_COUNT: ${{ steps.changed.outputs.count }}
-        run: echo "Changed count: ${CHANGED_COUNT:-0}"
+        run: |
+            echo "Changed count: ${CHANGED_COUNT:-0}""
 
       # --- PR con cambiados → usa lista ---
       - name: Run Ollama Code Review (PR changed files)

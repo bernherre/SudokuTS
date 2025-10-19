@@ -30,7 +30,7 @@ npm run preview
 
 ## Despliegue en GitHub Pages
 1. Crea un repo y sube este código.
-2. Asegúrate de que la rama por defecto sea `main`.
+2. Asegúrate de que la rama por defecto sea `main`
 3. Activa **Pages** en Settings → Pages → Source: **GitHub Actions**.
 4. El workflow `Deploy to GitHub Pages` publicará `dist/` en tu página y revisa con AI el código cambiado.
 
