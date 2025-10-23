@@ -9,7 +9,7 @@ Juego de Sudoku en el navegador con:
 - **Pruebas:** Vitest + jsdom
 - **CI/CD:** GitHub Actions para desplegar en **GitHub Pages**
 - **Buenas prácticas:** TypeScript estricto, funciones puras para el motor, UI desacoplada
-- **.gitignore:** incluye entradas típicas de PHP además de Node
+- **.gitignore:** incluye entradas típicas de PHP además de Node.
 
 ## Uso local
 ```bash
